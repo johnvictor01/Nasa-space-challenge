@@ -15,6 +15,8 @@
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
     "groq-sdk": "^0.33.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "fluent-ffmpeg": "^2.1.2",
+    "ffmpeg-static": "^5.1.0"
   }
 }

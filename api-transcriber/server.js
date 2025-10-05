@@ -1,5 +1,4 @@
 import express from "express";
-import multer from "multer";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
@@ -8,7 +7,7 @@ import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 
 dotenv.config();
-// valida variável de ambiente da chave da API para falhas rápidas na inicialização
+
 const GROQ_KEY = process.env.GROQ_KEY;
 if (!GROQ_KEY || GROQ_KEY === "nasasapceChalleng") {
   console.error(
@@ -18,20 +17,36 @@ if (!GROQ_KEY || GROQ_KEY === "nasasapceChalleng") {
 }
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
-const groq = new Groq({ apiKey: GROQ_KEY });
+app.use(express.json({ limit: "100mb" })); // permite grandes base64
 
-// configura o caminho do binário ffmpeg fornecido por ffmpeg-static
+const groq = new Groq({ apiKey: GROQ_KEY });
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
-app.post("/transcribe", upload.single("audio"), async (req, res) => {
+app.post("/transcribe", async (req, res) => {
   try {
-    const filePath = req.file.path;
+    const { audioBase64 } = req.body;
 
-    // Converter qualquer áudio recebido para MP3 usando ffmpeg
-    const tempMp3Path = filePath + ".converted.mp3";
+    if (!audioBase64) {
+      return res
+        .status(400)
+        .json({ sucesso: false, erro: "Parâmetro 'audioBase64' ausente" });
+    }
+
+    // cria um arquivo temporário único
+    const tempDir = "uploads";
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+    const tempFilePath = path.join(tempDir, `audio_${Date.now()}.input`);
+    const tempMp3Path = tempFilePath + ".converted.mp3";
+
+    // remove prefixo do base64, se existir (ex: data:audio/wav;base64,...)
+    const base64Data = audioBase64.replace(/^data:audio\/\w+;base64,/, "");
+
+    // grava o buffer decodificado em disco
+    fs.writeFileSync(tempFilePath, Buffer.from(base64Data, "base64"));
+
+    // converte para mp3 usando ffmpeg
     await new Promise((resolve, reject) => {
-      ffmpeg(filePath)
+      ffmpeg(tempFilePath)
         .toFormat("mp3")
         .on("error", (err) => {
           console.error("Erro na conversão ffmpeg:", err.message);
@@ -41,15 +56,16 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
         .save(tempMp3Path);
     });
 
+    // envia o arquivo convertido para o modelo Whisper
     const response = await groq.audio.transcriptions.create({
       file: fs.createReadStream(tempMp3Path),
       model: "whisper-large-v3-turbo",
     });
 
-    // remove arquivos temporários (original e convertido)
+    // remove arquivos temporários
     try {
+      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
       if (fs.existsSync(tempMp3Path)) fs.unlinkSync(tempMp3Path);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch (e) {
       console.warn("Não foi possível remover arquivo temporário:", e.message);
     }
@@ -59,7 +75,6 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
       texto: response.text,
     });
   } catch (err) {
-    // se a chamada à API retornar 401, propague um erro mais claro
     const status = err?.response?.status || err?.status || 500;
     const message =
       status === 401

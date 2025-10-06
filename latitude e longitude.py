@@ -1,4 +1,4 @@
-# gera_cidades_paraiba.py
+3# gera_cidades_paraiba.py
 """
 Gera um dicionário Python com todas as cidades da Paraíba no formato:
 "paraiba-nomecidade": (lat, lon)
